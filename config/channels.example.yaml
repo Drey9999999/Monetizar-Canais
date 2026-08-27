@@ -1,0 +1,38 @@
+# Copie para config/channels.yaml e ajuste.
+#
+# Comece com UM canal. Só duplique para o segundo depois que o primeiro tiver
+# dados de retenção — 20 canais errados custam 20x mais que 1 canal errado.
+#
+# duration_profile:
+#   shorts          -> cortes de 15-59s (YouTube Shorts, Reels, TikTok orgânico)
+#   tiktok_rewards  -> cortes de 60s+   (único formato que o Creator Rewards paga)
+
+channels:
+  - slug: cortes-podcast-br
+    name: "Cortes que Importam"
+    niche: "podcast / entrevistas BR"
+    duration_profile: shorts
+    platforms: [youtube, tiktok]
+    language: pt
+    queries:
+      - "podcast brasileiro entrevista completa"
+      - "flow podcast melhores momentos"
+    sources:
+      # Canais ou playlists acompanhados direto. Use fontes que você tem
+      # direito de usar: canal próprio, licença, parceria ou material em
+      # domínio público. Cortar canal alheio sem autorização é risco de
+      # strike de copyright, não só de desmonetização.
+      - "https://www.youtube.com/@SEU_CANAL/videos"
+    hashtags: ["#podcastbr", "#cortes", "#motivacao"]
+
+  # Segundo canal só depois de validar o primeiro. Deixe desabilitado até lá.
+  - slug: financas-shorts
+    name: "Dinheiro em 30s"
+    niche: "finanças pessoais"
+    duration_profile: tiktok_rewards
+    platforms: [tiktok]
+    language: pt
+    enabled: false
+    queries:
+      - "educação financeira investimentos iniciante"
+    hashtags: ["#financas", "#investimentos", "#dinheiro"]

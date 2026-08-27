@@ -1,0 +1,65 @@
+# Copie para config/config.yaml e ajuste. O arquivo real é ignorado pelo git.
+
+download:
+  max_height: 1080          # Shorts/TikTok entregam no máximo 1080x1920
+  container: mp4
+  subtitle_languages: [pt, pt-BR, en]
+  min_duration: 120         # fonte curta demais não tem corte bom dentro
+  max_duration: 7200        # lives de 6h custam caro para baixar e analisar
+  cookies_file: null        # ex.: config/cookies.txt, para vídeos restritos
+  sleep_interval: 2.0       # pausa entre downloads
+  rate_limit: null          # ex.: "5M"
+
+clip:
+  target_duration: 30.0     # o algoritmo do Shorts favorece 20-35s
+  min_duration: 15.0
+  max_duration: 59.0
+  max_clips_per_source: 3   # mais que isso vira conteúdo repetitivo
+  min_gap_between_clips: 45.0
+  width: 1080
+  height: 1920
+  fps: 30
+  reframe: blur             # blur | crop | pad
+  burn_captions: true       # 85% dos Shorts começam sem som
+  caption_style: karaoke    # karaoke | block
+  hook_enabled: true
+  hook_duration: 3.0
+  normalize_audio: true     # -14 LUFS, o alvo das plataformas
+  video_bitrate: 8M
+  audio_bitrate: 192k
+  crf: 20
+  preset: medium
+
+analysis:
+  window: 1.0
+  weight_audio: 1.0
+  weight_keywords: 1.5
+  weight_speech: 0.8
+  skip_intro: 20.0          # intro do canal original raramente rende corte
+  skip_outro: 20.0
+  # Palavras que sinalizam um momento de gancho. Ajuste ao seu nicho — esta é
+  # a alavanca mais barata para melhorar a qualidade dos cortes.
+  keywords:
+    - segredo
+    - ninguém
+    - nunca
+    - erro
+    - verdade
+    - descobri
+    - impossível
+    - o problema
+    - a razão
+    - na real
+
+publish:
+  videos_per_day: 5
+  slots: ["08:00", "12:00", "15:00", "18:00", "21:00"]
+  buffer_days: 3            # dias de conteúdo pronto em estoque
+  timezone: America/Sao_Paulo
+
+paths:
+  data: data
+  downloads: data/downloads
+  clips: data/clips
+  work: data/work
+  database: data/monetizar.db

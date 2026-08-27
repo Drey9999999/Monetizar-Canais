@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "monetizar-canais"
+version = "0.1.0"
+description = "Pipeline de cortes verticais para YouTube Shorts e TikTok"
+requires-python = ">=3.11"
+dependencies = [
+    "yt-dlp>=2024.8.6",
+    "numpy>=1.24",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+monetizar = "monetizar.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

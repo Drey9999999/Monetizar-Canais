@@ -1,0 +1,16 @@
+# Dados gerados: vídeos, cortes e banco não vão para o repositório.
+data/
+*.db
+
+# Configuração real (pode conter caminho de cookies e fontes privadas)
+config/config.yaml
+config/channels.yaml
+config/cookies.txt
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
