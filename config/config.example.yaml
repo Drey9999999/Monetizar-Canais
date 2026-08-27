@@ -9,6 +9,9 @@ download:
   cookies_file: null        # ex.: config/cookies.txt, para vídeos restritos
   sleep_interval: 2.0       # pausa entre downloads
   rate_limit: null          # ex.: "5M"
+  extract_retries: 4        # tentativas quando o YouTube responde 403/429
+  retry_backoff: 3.0        # espera inicial entre tentativas; dobra a cada falha
+  retry_backoff_max: 30.0   # teto da espera entre tentativas
 
 clip:
   target_duration: 30.0     # o algoritmo do Shorts favorece 20-35s
@@ -22,6 +25,16 @@ clip:
   reframe: blur             # blur | crop | pad
   burn_captions: true       # 85% dos Shorts começam sem som
   caption_style: karaoke    # karaoke | block
+  # Legibilidade da legenda queimada. Os padrões saem da métrica real da fonte
+  # (DejaVu Sans Bold): a 72px com margem de 8% sobram 908px de largura útil e
+  # ~45px por caractere em português, então cabem 20. Aumentar caption_wrap sem
+  # baixar caption_font_scale joga o texto para fora da tela e ele sai cortado.
+  caption_font_scale: 0.038 # altura da fonte como fração da altura do vídeo
+  caption_wrap: 20          # caracteres por linha da legenda
+  hook_wrap: 14             # caracteres por linha do gancho (maiúsculo, 1.25x)
+  safe_margin_h: 0.08       # margem lateral
+  caption_margin_v: 0.18    # altura da legenda a partir da base
+  hook_margin_v: 0.40       # altura do gancho a partir do topo
   hook_enabled: true
   hook_duration: 3.0
   normalize_audio: true     # -14 LUFS, o alvo das plataformas

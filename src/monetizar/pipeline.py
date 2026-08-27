@@ -13,7 +13,13 @@ from .captions import Cue, parse_vtt
 from .channels import Channel
 from .config import Config
 from .db import Database
-from .downloader import DownloadedVideo, Downloader, VideoInfo
+from .downloader import (
+    DownloadedVideo,
+    Downloader,
+    DownloaderError,
+    SourceUnavailable,
+    VideoInfo,
+)
 from .editor import Editor, EditorError
 from .metadata import ClipMetadata, build_metadata
 
@@ -71,16 +77,37 @@ class Pipeline:
 
     # ------------------------------------------------------------- descoberta
 
-    def discover(self, channel: Channel, per_query: int = 10) -> list[VideoInfo]:
-        """Junta candidatos das buscas e das fontes fixas do canal."""
+    def discover(
+        self, channel: Channel, per_query: int = 10, report: RunReport | None = None
+    ) -> list[VideoInfo]:
+        """Junta candidatos das buscas e das fontes fixas do canal.
+
+        Uma busca que falha não derruba as outras, mas também não some: fica
+        registrada em `report.errors`, senão um bloqueio do YouTube chega na
+        tela como "nenhum vídeo encontrado".
+        """
         found: dict[str, VideoInfo] = {}
 
         for query in channel.queries:
-            for video in self.downloader.search(query, limit=per_query):
+            try:
+                videos = self.downloader.search(query, limit=per_query)
+            except DownloaderError as exc:
+                log.warning("Busca %r falhou: %s", query, exc)
+                if report is not None:
+                    report.errors.append(f"busca {query!r}: {exc}")
+                continue
+            for video in videos:
                 found.setdefault(video.video_id, video)
 
         for source in channel.sources:
-            for video in self.downloader.channel_videos(source, limit=per_query):
+            try:
+                videos = self.downloader.channel_videos(source, limit=per_query)
+            except DownloaderError as exc:
+                log.warning("Fonte %s falhou: %s", source, exc)
+                if report is not None:
+                    report.errors.append(f"fonte {source}: {exc}")
+                continue
+            for video in videos:
                 found.setdefault(video.video_id, video)
 
         candidates = self.downloader.filter_candidates(found.values())
@@ -108,7 +135,7 @@ class Pipeline:
         channel.apply_profile(self.config.clip)
         report = RunReport(channel=channel.slug)
 
-        candidates = self.discover(channel, per_query=per_query)
+        candidates = self.discover(channel, per_query=per_query, report=report)
         report.discovered = len(candidates)
         log.info("Canal '%s': %d fontes candidatas", channel.slug, len(candidates))
 
@@ -130,7 +157,8 @@ class Pipeline:
             except Exception as exc:  # uma fonte ruim não pode derrubar o lote
                 log.exception("Erro processando %s", video.video_id)
                 report.errors.append(f"{video.video_id}: {exc}")
-                self.db.mark_source(video.video_id, "error")
+                # Upsert: a fonte pode ter falhado antes de ser inserida.
+                self.db.add_source(video, status="error")
                 continue
             report.clips.extend(produced[: max(target_clips - len(report.clips), 0)])
 
@@ -141,7 +169,20 @@ class Pipeline:
         self, channel: Channel, video: VideoInfo, report: RunReport
     ) -> list[ClipOutput]:
         log.info("Baixando %s — %s", video.video_id, video.title[:70])
-        downloaded = self.downloader.download(video)
+        try:
+            downloaded = self.downloader.download(video)
+        except SourceUnavailable as exc:
+            # O vídeo é o problema (idade, privado, região): registrar o motivo
+            # e seguir. Tentar de novo depois não muda nada.
+            log.info("  fonte indisponível (%s), pulando", exc.reason)
+            # add_source (upsert) e não mark_source (UPDATE): a fonte nunca foi
+            # inserida, então um UPDATE não gravaria nada e o vídeo voltaria na
+            # descoberta do próximo run, para falhar de novo pelo mesmo motivo.
+            self.db.add_source(video, status=f"unavailable:{exc.reason}")
+            report.errors.append(f"{video.video_id}: indisponível ({exc.reason})")
+            report.skipped += 1
+            return []
+
         if not downloaded:
             report.skipped += 1
             return []
@@ -255,7 +296,19 @@ class Pipeline:
             return []
         try:
             cues = parse_vtt(downloaded.subtitle_path)
-            log.info("  legenda com %d linhas", len(cues))
+            com_timing = sum(1 for c in cues if c.words)
+            log.info(
+                "  legenda %s: %d linhas, %d com timing de palavra",
+                downloaded.subtitle_path.name, len(cues), com_timing,
+            )
+            if self.config.clip.caption_style == "karaoke" and not com_timing:
+                # Legenda manual do YouTube não traz <00:00:01.240> por palavra;
+                # só a automática traz. Sem isso o karaokê vira legenda em bloco
+                # — o corte sai, mas sem o efeito palavra a palavra.
+                log.warning(
+                    "  legenda sem timing de palavra (provavelmente manual); "
+                    "o estilo karaokê vai sair como bloco"
+                )
             return cues
         except Exception as exc:
             log.warning("  legenda ilegível (%s); seguindo sem ela", exc)

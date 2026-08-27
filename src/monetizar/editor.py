@@ -147,6 +147,12 @@ class Editor:
             style=self.cfg.caption_style,
             hook=hook if self.cfg.hook_enabled else None,
             hook_duration=self.cfg.hook_duration,
+            font_scale=self.cfg.caption_font_scale,
+            caption_wrap=self.cfg.caption_wrap,
+            hook_wrap=self.cfg.hook_wrap,
+            margin_h=self.cfg.safe_margin_h,
+            caption_margin_v=self.cfg.caption_margin_v,
+            hook_margin_v=self.cfg.hook_margin_v,
         )
         path = self.work_dir / f"{stem}.ass"
         path.write_text(content, encoding="utf-8")

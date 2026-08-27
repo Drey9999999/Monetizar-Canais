@@ -13,7 +13,7 @@ from .captions import parse_vtt
 from .channels import Channel, find_channel, load_channels
 from .config import Config
 from .db import Database
-from .downloader import Downloader
+from .downloader import Downloader, DownloaderError
 from .editor import Editor, EditorError
 from .metadata import build_metadata
 from .pipeline import Pipeline, RunReport
@@ -47,11 +47,16 @@ def cmd_search(args: argparse.Namespace) -> int:
     config = Config.load(args.config)
     downloader = Downloader(config)
 
-    videos = (
-        downloader.channel_videos(args.query, limit=args.limit)
-        if args.query.startswith("http")
-        else downloader.search(args.query, limit=args.limit)
-    )
+    try:
+        videos = (
+            downloader.channel_videos(args.query, limit=args.limit)
+            if args.query.startswith("http")
+            else downloader.search(args.query, limit=args.limit)
+        )
+    except DownloaderError as exc:
+        # Sem isto, um bloqueio do YouTube saía como "nenhum vídeo encontrado".
+        print(f"erro: a busca não chegou ao YouTube — {exc}", file=sys.stderr)
+        return 2
     videos = downloader.filter_candidates(videos)
 
     if args.json:
@@ -76,12 +81,17 @@ def cmd_download(args: argparse.Namespace) -> int:
     config = Config.load(args.config)
     downloader = Downloader(config)
 
-    info = downloader.inspect(args.url)
-    if not info:
-        print("erro: não foi possível ler o vídeo", file=sys.stderr)
-        return 1
+    try:
+        info = downloader.inspect(args.url)
+        if not info:
+            print("erro: não foi possível ler o vídeo", file=sys.stderr)
+            return 1
 
-    result = downloader.download(info)
+        result = downloader.download(info)
+    except DownloaderError as exc:
+        print(f"erro: {exc}", file=sys.stderr)
+        return 2
+
     if not result:
         print("erro: download falhou", file=sys.stderr)
         return 1

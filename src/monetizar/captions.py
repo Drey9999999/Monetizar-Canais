@@ -20,6 +20,14 @@ CUE_RE = re.compile(
 INLINE_TS_RE = re.compile(r"<(\d{2}:\d{2}:\d{2}[.,]\d{3})>")
 TAG_RE = re.compile(r"</?[cbiu][^>]*>")
 
+# A legenda automática do YouTube rola: a última linha fica na tela até a
+# próxima fala começar, então o `end` da cue marca "quando veio a próxima
+# coisa", não "quando esta linha acabou". Num vídeo real medimos uma cue de
+# 26,6s cujo áudio dura 0,2s — sem teto, a palavra final fica parada na tela
+# o corte inteiro. Estes limites são o teto de exibição, não a duração real.
+MAX_WORD_ON_SCREEN = 2.0
+MAX_CUE_ON_SCREEN = 7.0
+
 
 @dataclass
 class Word:
@@ -47,8 +55,18 @@ class Cue:
         )
 
 
-def parse_vtt(path: Path) -> list[Cue]:
-    """Lê um WebVTT e devolve as cues com timing de palavra quando houver."""
+def parse_vtt(
+    path: Path,
+    *,
+    max_word_on_screen: float = MAX_WORD_ON_SCREEN,
+    max_cue_on_screen: float = MAX_CUE_ON_SCREEN,
+) -> list[Cue]:
+    """Lê um WebVTT e devolve as cues com timing de palavra quando houver.
+
+    Os tempos de fim vêm limitados: o VTT rolante do YouTube estica a última
+    cue de cada pausa até a fala seguinte, e esse valor não serve nem para
+    exibir legenda nem para medir densidade de fala.
+    """
     raw = path.read_text(encoding="utf-8", errors="replace")
     cues: list[Cue] = []
 
@@ -65,16 +83,34 @@ def parse_vtt(path: Path) -> list[Cue]:
         if not body:
             continue
 
-        words = _parse_words(body, start, end)
+        words = _parse_words(body, start, end, max_word_on_screen)
         text = _strip(body)
         if not text:
             continue
-        cues.append(Cue(start=start, end=end, text=text, words=words))
+        cues.append(
+            _clamp(Cue(start=start, end=end, text=text, words=words), max_cue_on_screen)
+        )
 
-    return _dedupe(cues)
+    return _dedupe(cues, max_cue_on_screen)
 
 
-def _parse_words(body: str, cue_start: float, cue_end: float) -> list[Word]:
+def _clamp(cue: Cue, max_cue_on_screen: float) -> Cue:
+    """Encurta o fim da cue até onde ela realmente tem conteúdo.
+
+    Com timing de palavra, o fim confiável é o fim da última palavra. Sem ele,
+    resta um teto fixo de leitura.
+    """
+    if cue.words:
+        cue.end = min(cue.end, cue.words[-1].end)
+    else:
+        cue.end = min(cue.end, cue.start + max_cue_on_screen)
+    cue.end = max(cue.end, cue.start + 0.05)
+    return cue
+
+
+def _parse_words(
+    body: str, cue_start: float, cue_end: float, max_word_on_screen: float
+) -> list[Word]:
     """Extrai palavras com timing individual do corpo de uma cue."""
     if not INLINE_TS_RE.search(body):
         return []
@@ -95,18 +131,25 @@ def _parse_words(body: str, cue_start: float, cue_end: float) -> list[Word]:
             words.append(Word(chunk, ts, ts))
 
     # Cada palavra termina onde a próxima começa; a última vai até o fim da cue.
+    # O teto cobre os dois casos em que esse cálculo estoura: a pausa longa no
+    # meio da cue e o fim inflado da cue rolante.
     for i, word in enumerate(words):
         word.end = words[i + 1].start if i + 1 < len(words) else cue_end
+        word.end = min(word.end, word.start + max_word_on_screen)
         if word.end <= word.start:
             word.end = word.start + 0.15
     return words
 
 
-def _dedupe(cues: list[Cue]) -> list[Cue]:
+def _dedupe(cues: list[Cue], max_cue_on_screen: float = MAX_CUE_ON_SCREEN) -> list[Cue]:
     """Remove a repetição de linhas típica da legenda automática do YouTube.
 
     A legenda automática rola linha a linha: cada cue repete a anterior mais uma
     palavra nova. Sem limpar isso, a legenda queimada aparece duplicada.
+
+    A fusão passa pelo mesmo teto do parse: juntar a cue curta com a cue
+    seguinte, que já vem esticada até a próxima fala, devolveria o fim inflado
+    que acabamos de cortar.
     """
     out: list[Cue] = []
     for cue in cues:
@@ -114,9 +157,70 @@ def _dedupe(cues: list[Cue]) -> list[Cue]:
             # Mantém a versão mais completa e estende o tempo.
             if len(cue.text) >= len(out[-1].text):
                 merged_words = cue.words or out[-1].words
-                out[-1] = Cue(out[-1].start, cue.end, cue.text, merged_words)
+                out[-1] = _clamp(
+                    Cue(out[-1].start, cue.end, cue.text, merged_words),
+                    max_cue_on_screen,
+                )
             continue
+        if out:
+            cue = _trim_overlap(out[-1], cue)
+            if not cue.text:
+                continue
         out.append(cue)
+    return out
+
+
+def _trim_overlap(anterior: Cue, cue: Cue) -> Cue:
+    """Corta do início da cue o pedaço que só repete o fim da anterior.
+
+    A legenda automática do YouTube rola em duas linhas: a primeira linha de
+    cada cue é a segunda linha da cue anterior. A sobreposição é sufixo →
+    prefixo, não prefixo inteiro, então o caso acima não pega. Sem isto cada
+    frase entra duas vezes no texto do trecho — o que dobra a densidade de
+    fala medida pelo analyzer e duplica título, descrição e legenda queimada.
+    """
+    anteriores = anterior.text.split()
+    atuais = cue.text.split()
+    n = _overlap(anteriores, atuais)
+    if not n:
+        return cue
+
+    resto = atuais[n:]
+    if not resto:
+        return Cue(cue.start, cue.end, "", [])
+
+    words = _drop_leading_tokens(cue.words, n)
+    start = words[0].start if words else cue.start
+    return Cue(start=start, end=max(cue.end, start + 0.05), text=" ".join(resto), words=words)
+
+
+def _overlap(anteriores: list[str], atuais: list[str]) -> int:
+    """Maior sufixo de `anteriores` que abre `atuais`, contado em palavras."""
+    for n in range(min(len(anteriores), len(atuais)), 0, -1):
+        if anteriores[-n:] == atuais[:n]:
+            return n
+    return 0
+
+
+def _drop_leading_tokens(words: list[Word], n_tokens: int) -> list[Word]:
+    """Descarta as `n_tokens` primeiras palavras da lista de Words.
+
+    Um Word pode carregar várias palavras: `_parse_words` junta num só bloco
+    tudo que vem antes do primeiro timestamp inline. Por isso o corte é por
+    contagem de token, não por índice de Word.
+    """
+    out: list[Word] = []
+    consumidos = 0
+    for word in words:
+        tokens = word.text.split()
+        if consumidos >= n_tokens:
+            out.append(word)
+        elif consumidos + len(tokens) <= n_tokens:
+            consumidos += len(tokens)
+        else:
+            resto = tokens[n_tokens - consumidos:]
+            consumidos = n_tokens
+            out.append(Word(" ".join(resto), word.start, word.end))
     return out
 
 
@@ -173,9 +277,20 @@ def build_ass(
     hook: str | None = None,
     hook_duration: float = 3.0,
     font: str = "DejaVu Sans",
+    font_scale: float = 0.038,
+    caption_wrap: int = 20,
+    hook_wrap: int = 14,
+    margin_h: float = 0.08,
+    caption_margin_v: float = 0.18,
+    hook_margin_v: float = 0.40,
 ) -> str:
-    """Gera um arquivo ASS pronto para o filtro `subtitles` do ffmpeg."""
-    size = max(int(height * 0.045), 24)
+    """Gera um arquivo ASS pronto para o filtro `subtitles` do ffmpeg.
+
+    As quebras padrão saem da métrica real da fonte: com DejaVu Sans Bold a
+    3,8% da altura e margem de 8%, cabem ~20 caracteres de legenda e ~14 de
+    gancho na largura útil. Valores maiores empurram o texto para fora da tela.
+    """
+    size = max(int(height * font_scale), 24)
     header = ASS_HEADER.format(
         width=width,
         height=height,
@@ -183,9 +298,9 @@ def build_ass(
         size=size,
         hook_size=int(size * 1.25),
         outline=max(int(size * 0.09), 3),
-        margin_h=int(width * 0.08),
-        margin_v=int(height * 0.18),
-        hook_margin=int(height * 0.55),
+        margin_h=int(width * margin_h),
+        margin_v=int(height * caption_margin_v),
+        hook_margin=int(height * hook_margin_v),
     )
 
     lines: list[str] = []
@@ -193,7 +308,7 @@ def build_ass(
         # O gancho é maiúsculo e 25% maior que a legenda, e maiúscula ocupa mais
         # largura por caractere — daí uma quebra bem mais curta que a da legenda.
         lines.append(
-            _event("Hook", 0.0, hook_duration, _wrap(_escape(hook.upper()), 14))
+            _event("Hook", 0.0, hook_duration, _wrap(_escape(hook.upper()), hook_wrap))
         )
 
     for cue in cues:
@@ -201,14 +316,16 @@ def build_ass(
             continue
         start = max(cue.start, 0.0)
         if style == "karaoke" and cue.words:
-            lines.extend(_karaoke_events(cue, start))
+            lines.extend(_karaoke_events(cue, start, caption_wrap))
         else:
-            lines.append(_event("Caption", start, cue.end, _wrap(_escape(cue.text), 26)))
+            lines.append(
+                _event("Caption", start, cue.end, _wrap(_escape(cue.text), caption_wrap))
+            )
 
     return header + "\n".join(lines) + "\n"
 
 
-def _karaoke_events(cue: Cue, start: float) -> list[str]:
+def _karaoke_events(cue: Cue, start: float, wrap: int = 26) -> list[str]:
     """Uma cue vira N eventos: a cada palavra, o texto todo é redesenhado com
     aquela palavra destacada. É o efeito palavra-a-palavra que segura retenção.
     """
@@ -221,7 +338,7 @@ def _karaoke_events(cue: Cue, start: float) -> list[str]:
         for j, other in enumerate(words):
             colour = HIGHLIGHT if j == i else NORMAL
             pieces.append(f"{colour}{_escape(other.text)}")
-        events.append(_event("Caption", seg_start, seg_end, _wrap(" ".join(pieces), 26)))
+        events.append(_event("Caption", seg_start, seg_end, _wrap(" ".join(pieces), wrap)))
     return events
 
 

@@ -77,6 +77,22 @@ duração configurada.
 monetizar download "https://www.youtube.com/watch?v=VIDEO_ID"
 ```
 
+**Se o download falhar com "Sign in to confirm you're not a bot":** o YouTube
+recusa requisições não autenticadas vindas de IP de datacenter (VPS, CI,
+container). A busca continua funcionando — ela usa outra API — mas o stream de
+mídia responde 403. Isso não é bug do projeto e não tem contorno: a saída é
+autenticar, apontando `download.cookies_file` para um `cookies.txt` exportado de
+um navegador logado.
+
+```yaml
+download:
+  cookies_file: config/cookies.txt
+```
+
+Sem isso, `extract_retries` ainda ajuda quando o bloqueio é intermitente: cada
+tentativa é uma nova chance, com espera dobrando até `retry_backoff_max`. Num
+IP bloqueado de vez, nenhuma quantidade de tentativa resolve.
+
 ### Cortar um arquivo local
 
 ```bash
@@ -145,13 +161,34 @@ qualidade dos cortes. Ajuste ao seu nicho.
 
 - **9:16 em 1080x1920.** Três modos: `blur` (fundo desfocado, preserva o
   enquadramento original), `crop` (corte central) ou `pad` (barras pretas).
-- **Legenda karaokê palavra a palavra.** As legendas automáticas do YouTube
+- **Legenda karaokê palavra a palavra.** As legendas **automáticas** do YouTube
   trazem o timing de cada palavra embutido no VTT, então dá para animar sem rodar
   transcrição própria. 85% dos Shorts começam sem som — sem legenda, o gancho não
-  é entregue.
+  é entregue. A legenda **manual** do canal não traz esse timing: quando ela é a
+  escolhida, o karaokê cai para legenda em bloco e o log avisa.
 - **Gancho sobreposto** nos primeiros 3 segundos, tirado da própria fala.
 - **Áudio normalizado a -14 LUFS**, o alvo que as plataformas usam. Entregar já
   nesse nível evita a plataforma abaixar o volume do corte.
+
+### Ajustar a legibilidade da legenda
+
+Os padrões vêm da métrica real da fonte (DejaVu Sans Bold): a 72px com margem de
+8%, sobram 908px de largura útil e ~45px por caractere em português, então cabem
+20 por linha. **`caption_wrap` e `caption_font_scale` andam juntos** — subir a
+quebra sem baixar a fonte joga o texto para fora da tela, e ele sai cortado nas
+bordas.
+
+| Chave | Padrão | Efeito |
+|---|---|---|
+| `caption_font_scale` | 0.038 | fonte da legenda, fração da altura |
+| `caption_wrap` | 20 | caracteres por linha da legenda |
+| `hook_wrap` | 14 | caracteres por linha do gancho (maiúsculo, 1.25x) |
+| `safe_margin_h` | 0.08 | margem lateral |
+| `caption_margin_v` | 0.18 | altura da legenda, a partir da base |
+| `hook_margin_v` | 0.40 | altura do gancho, a partir do topo |
+
+O bloco de legenda cresce para cima a partir de `caption_margin_v`; se ele
+encostar no gancho, baixe `hook_margin_v` ou a fonte.
 
 ---
 

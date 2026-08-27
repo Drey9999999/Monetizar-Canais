@@ -35,6 +35,14 @@ class DownloadConfig:
     sleep_interval: float = 2.0
     # Limite de taxa, ex.: "5M". None = sem limite.
     rate_limit: str | None = None
+    # Tentativas de extração quando o YouTube responde 403/429 ou pede
+    # confirmação de bot. O `retries` do yt-dlp só cobre o download dos
+    # fragmentos — a extração estoura antes dele.
+    extract_retries: int = 4
+    # Espera inicial entre tentativas (segundos); dobra a cada falha.
+    retry_backoff: float = 3.0
+    # Teto da espera entre tentativas (segundos).
+    retry_backoff_max: float = 30.0
 
 
 @dataclass
@@ -63,6 +71,24 @@ class ClipConfig:
     burn_captions: bool = True
     # Estilo de legenda: "karaoke" (palavra a palavra) ou "block".
     caption_style: str = "karaoke"
+    # Altura da fonte da legenda como fração da altura do vídeo (0.038 = 72px
+    # em 1920). O valor anterior, 0.045, combinado com caption_wrap 26, gerava
+    # linhas de até 1460px numa tela de 1080 — o texto saía cortado nas bordas.
+    caption_font_scale: float = 0.038
+    # Quebra de linha, em caracteres. Medida com DejaVu Sans Bold a 72px e
+    # margem de 8%: sobram 908px de largura útil e ~45px por caractere em
+    # português, então cabem 20. Subir este número sem baixar
+    # caption_font_scale empurra o texto para fora da tela.
+    caption_wrap: int = 20
+    # O gancho é 25% maior (90px) e em maiúsculas, ~62px por caractere: 14 cabe.
+    hook_wrap: int = 14
+    # Margem lateral, fração da largura.
+    safe_margin_h: float = 0.08
+    # Altura da legenda medida a partir da base (alinhamento inferior no ASS).
+    caption_margin_v: float = 0.18
+    # Altura do gancho medida a partir do topo (alinhamento superior no ASS).
+    # Precisa deixar espaço para o bloco de legenda, que cresce para cima.
+    hook_margin_v: float = 0.40
     # Texto de gancho sobreposto nos primeiros segundos.
     hook_enabled: bool = True
     hook_duration: float = 3.0
